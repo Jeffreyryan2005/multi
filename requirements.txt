@@ -1,3 +1,0 @@
-flask==3.0.3
-groq
-gunicorn==22.0.0

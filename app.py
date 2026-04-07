@@ -366,42 +366,46 @@ def crypto_agent(msg):
             "timestamp":datetime.datetime.now().strftime("%H:%M:%S UTC")}
 
 def db_agent(msg):
-    conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row; m = msg.lower(); result = {}
-    if any(w in m for w in ["add task","create task","new task"]):
-        title_m=re.search(r'task[:\s]+["\']?(.+?)["\']?$',msg,re.IGNORECASE)
-        title=title_m.group(1).strip() if title_m else "New Task"
-        priority="high" if "urgent" in m or "high" in m else "medium" if "medium" in m else "low"
-        conn.execute("INSERT INTO tasks(title,status,priority,created_at) VALUES(?,?,?,?)",(title,"pending",priority,datetime.datetime.now().isoformat()))
-        conn.commit(); result={"agent":"Database Agent","action":"task_created","task":title,"priority":priority}
-    elif any(w in m for w in ["add note","save note","note:","remember"]):
-        note_m=re.search(r'(?:note|remember)[:\s]+(.+)',msg,re.IGNORECASE)
-        content=note_m.group(1).strip() if note_m else msg
-        conn.execute("INSERT INTO notes(content,tag,created_at) VALUES(?,?,?)",(content,"general",datetime.datetime.now().isoformat()))
-        conn.commit(); result={"agent":"Database Agent","action":"note_saved","content":content}
-    elif any(w in m for w in ["search","find","look for"]) and any(w in m for w in ["product","item"]):
-        term_m=re.search(r'(?:search|find|look for)\s+(.+)',msg,re.IGNORECASE)
-        term=term_m.group(1).replace("product","").replace("item","").strip() if term_m else ""
-        rows=conn.execute("SELECT * FROM products WHERE name LIKE ? OR category LIKE ?",(f"%{term}%",f"%{term}%")).fetchall()
-        result={"agent":"Database Agent","action":"product_search","query":term,"products":[dict(r) for r in rows]}
-    elif "task" in m and any(w in m for w in ["list","show","my","all","pending"]):
-        rows=conn.execute("SELECT * FROM tasks ORDER BY created_at DESC LIMIT 10").fetchall()
-        result={"agent":"Database Agent","action":"list_tasks","tasks":[dict(r) for r in rows],"count":len(rows)}
-    elif "sql" in m or "query" in m:
-        query_m=re.search(r'(?:sql|query)[:\s]+(.+)',msg,re.IGNORECASE)
-        if query_m:
-            q=query_m.group(1).strip()
-            if q.lower().startswith("select"):
-                try:
-                    rows=conn.execute(q).fetchall()
-                    result={"agent":"Database Agent","action":"sql_query","query":q,"rows":[dict(r) for r in rows],"count":len(rows)}
-                except Exception as e:
-                    result={"agent":"Database Agent","action":"sql_error","error":str(e)}
-            else: result={"agent":"Database Agent","action":"sql_blocked","message":"Only SELECT queries allowed."}
-        else: result={"agent":"Database Agent","action":"sql_hint","message":"Try: sql: SELECT * FROM products"}
-    else:
-        rows=conn.execute("SELECT * FROM products").fetchall()
-        result={"agent":"Database Agent","action":"list_products","products":[dict(r) for r in rows],"count":len(rows)}
-    conn.close(); return result
+    try:
+        init_db()  # Ensure DB/tables exist before every call
+        conn = sqlite3.connect(DB); conn.row_factory = sqlite3.Row; m = msg.lower(); result = {}
+        if any(w in m for w in ["add task","create task","new task"]):
+            title_m=re.search(r'task[:\s]+["\']?(.+?)["\']?$',msg,re.IGNORECASE)
+            title=title_m.group(1).strip() if title_m else "New Task"
+            priority="high" if "urgent" in m or "high" in m else "medium" if "medium" in m else "low"
+            conn.execute("INSERT INTO tasks(title,status,priority,created_at) VALUES(?,?,?,?)",(title,"pending",priority,datetime.datetime.now().isoformat()))
+            conn.commit(); result={"agent":"Database Agent","action":"task_created","task":title,"priority":priority}
+        elif any(w in m for w in ["add note","save note","note:","remember"]):
+            note_m=re.search(r'(?:note|remember)[:\s]+(.+)',msg,re.IGNORECASE)
+            content=note_m.group(1).strip() if note_m else msg
+            conn.execute("INSERT INTO notes(content,tag,created_at) VALUES(?,?,?)",(content,"general",datetime.datetime.now().isoformat()))
+            conn.commit(); result={"agent":"Database Agent","action":"note_saved","content":content}
+        elif any(w in m for w in ["search","find","look for"]) and any(w in m for w in ["product","item"]):
+            term_m=re.search(r'(?:search|find|look for)\s+(.+)',msg,re.IGNORECASE)
+            term=term_m.group(1).replace("product","").replace("item","").strip() if term_m else ""
+            rows=conn.execute("SELECT * FROM products WHERE name LIKE ? OR category LIKE ?",(f"%{term}%",f"%{term}%")).fetchall()
+            result={"agent":"Database Agent","action":"product_search","query":term,"products":[dict(r) for r in rows]}
+        elif "task" in m and any(w in m for w in ["list","show","my","all","pending"]):
+            rows=conn.execute("SELECT * FROM tasks ORDER BY created_at DESC LIMIT 10").fetchall()
+            result={"agent":"Database Agent","action":"list_tasks","tasks":[dict(r) for r in rows],"count":len(rows)}
+        elif "sql" in m or "query" in m:
+            query_m=re.search(r'(?:sql|query)[:\s]+(.+)',msg,re.IGNORECASE)
+            if query_m:
+                q=query_m.group(1).strip()
+                if q.lower().startswith("select"):
+                    try:
+                        rows=conn.execute(q).fetchall()
+                        result={"agent":"Database Agent","action":"sql_query","query":q,"rows":[dict(r) for r in rows],"count":len(rows)}
+                    except Exception as e:
+                        result={"agent":"Database Agent","action":"sql_error","error":str(e)}
+                else: result={"agent":"Database Agent","action":"sql_blocked","message":"Only SELECT queries allowed."}
+            else: result={"agent":"Database Agent","action":"sql_hint","message":"Try: sql: SELECT * FROM products"}
+        else:
+            rows=conn.execute("SELECT * FROM products").fetchall()
+            result={"agent":"Database Agent","action":"list_products","products":[dict(r) for r in rows],"count":len(rows)}
+        conn.close(); return result
+    except Exception as e:
+        return {"agent":"Database Agent","action":"error","error":str(e),"message":"Database error — check server logs."}
 
 def calc_agent(msg):
     import math as _math; m = msg
@@ -1543,6 +1547,7 @@ def health():
     return jsonify({"status": "ok", "agents": 6, "products": p,
                     "real_time": {"weather": "Open-Meteo API", "crypto": "CoinGecko API", "news": "RSS Feeds"}})
 
+init_db()  # Always initialize DB on startup (works with gunicorn too)
+
 if __name__ == "__main__":
-    init_db()
     app.run(debug=False)
